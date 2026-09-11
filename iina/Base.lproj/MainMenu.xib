@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="22505" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" customObjectInstantitationMethod="direct">
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="25095" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" customObjectInstantitationMethod="direct">
     <dependencies>
         <deployment identifier="macosx"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="22505"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="25095"/>
     </dependencies>
     <objects>
         <customObject id="-2" userLabel="File's Owner" customClass="NSApplication">
@@ -391,6 +391,12 @@ CA
                             <menuItem title="Float on Top" id="wex-rX-PcY">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
+                            <menuItem title="Lock Window Aspect Ratio" id="Saz-zT-RXt">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
+                            <menuItem title="Live Text" id="lq9-av-Um9">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
                             <menuItem isSeparatorItem="YES" id="xpM-h7-A4R"/>
                             <menuItem title="Enter Music Mode" id="bGN-E4-V5A">
                                 <modifierMask key="keyEquivalentModifierMask"/>
@@ -667,6 +673,16 @@ CA
                                     <action selector="helpAction:" target="Voe-Tx-rLC" id="aqh-p6-pB4"/>
                                 </connections>
                             </menuItem>
+                            <menuItem title="Dump Debug Info" id="Mbl-Pv-GuB">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="dumpDebugInfo:" target="Voe-Tx-rLC" id="54x-yF-LJc"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" id="fa5-h1-gwZ"/>
+                            <menuItem title="Use New Settings Window" id="DrD-Zh-yWp">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
                             <menuItem isSeparatorItem="YES" id="ZO8-wH-FBe"/>
                             <menuItem title="Release Highlights" id="kOx-hc-aQG">
                                 <modifierMask key="keyEquivalentModifierMask"/>
@@ -714,6 +730,7 @@ CA
                 <outlet property="cycleAudioTracks" destination="n8f-ub-Udb" id="Mi8-8E-kaH"/>
                 <outlet property="cycleSubtitles" destination="sgu-dK-IGE" id="pE4-5V-JoV"/>
                 <outlet property="cycleVideoTracks" destination="taT-mP-2Kv" id="NAE-Wh-Fk6"/>
+                <outlet property="debugDump" destination="Mbl-Pv-GuB" id="qL3-tK-3nU"/>
                 <outlet property="decreaseAudioDelay" destination="Lc4-4W-thE" id="rZo-3n-vZW"/>
                 <outlet property="decreaseAudioDelaySlightly" destination="9ee-7i-xs7" id="5MX-I7-8Ky"/>
                 <outlet property="decreaseSubDelay" destination="LsU-Qz-dax" id="5Yw-0e-UyZ"/>
@@ -736,6 +753,7 @@ CA
                 <outlet property="fullScreen" destination="6Eq-ni-6hG" id="y11-Q1-drn"/>
                 <outlet property="gotoScreenshotFolder" destination="lj0-Oo-7nB" id="Jlj-kX-fv0"/>
                 <outlet property="halfSize" destination="snW-S8-Cw5" id="PDi-lV-6HL"/>
+                <outlet property="helpMenu" destination="F2S-fz-NVQ" id="4EF-3Y-jRz"/>
                 <outlet property="hideSecondSubtitles" destination="BOm-ia-wOV" id="iKO-xG-GWA"/>
                 <outlet property="hideSubtitles" destination="smo-rw-rg7" id="LQB-s7-8Yy"/>
                 <outlet property="increaseAudioDelay" destination="4ae-MT-2L1" id="nsv-LC-B9o"/>
@@ -748,8 +766,10 @@ CA
                 <outlet property="inspector" destination="bwz-r0-peR" id="dES-1R-XAY"/>
                 <outlet property="jumpTo" destination="2id-wn-xsC" id="wyH-9I-JHJ"/>
                 <outlet property="jumpToBegin" destination="2Ya-3g-1hy" id="atq-PX-lIt"/>
+                <outlet property="liveText" destination="lq9-av-Um9" id="p6s-Wn-lBw"/>
                 <outlet property="loadExternalAudio" destination="3xl-iD-85w" id="e85-xo-lzs"/>
                 <outlet property="loadExternalSub" destination="k6x-hf-ATi" id="lVp-BV-A2C"/>
+                <outlet property="lockAspectRatio" destination="Saz-zT-RXt" id="wW5-HK-O3t"/>
                 <outlet property="miniPlayer" destination="bGN-E4-V5A" id="gMc-FE-SVO"/>
                 <outlet property="mirror" destination="JJq-qH-toq" id="EWI-VS-c7Q"/>
                 <outlet property="mute" destination="WOL-Us-ByA" id="Hry-sv-WhY"/>
@@ -784,7 +804,6 @@ CA
                 <outlet property="resetAudioDelay" destination="H3d-jR-YCr" id="Qx9-n3-F90"/>
                 <outlet property="resetSubDelay" destination="SLr-6g-Mgh" id="8oW-hm-TNq"/>
                 <outlet property="resetTextSize" destination="P1a-ot-P31" id="fJk-GP-GBM"/>
-                <outlet property="showCurrentFileInFinder" destination="che-dy-QUU" id="p1H-Xj-dbg"/>
                 <outlet property="rotationMenu" destination="5xN-ZB-VLI" id="YGx-Ae-oMp"/>
                 <outlet property="saveDownloadedSub" destination="9zk-co-roT" id="lGr-mb-oHw"/>
                 <outlet property="savePlaylist" destination="Mjr-lL-oEt" id="ftc-bn-4Qi"/>
@@ -792,6 +811,7 @@ CA
                 <outlet property="savedVideoFiltersMenu" destination="xhY-fF-oio" id="MDx-8r-ENg"/>
                 <outlet property="screenshot" destination="AoP-K6-Kb5" id="dhl-4W-7yS"/>
                 <outlet property="secondSubTrackMenu" destination="UwY-P2-Xdb" id="D3B-WW-bAk"/>
+                <outlet property="showCurrentFileInFinder" destination="che-dy-QUU" id="p1H-Xj-dbg"/>
                 <outlet property="smallerSize" destination="ZOF-MG-6II" id="0jA-m5-Qy7"/>
                 <outlet property="speedDown" destination="HsE-LN-Nd6" id="0ZB-lc-ngV"/>
                 <outlet property="speedDownSlightly" destination="DUP-nm-BJt" id="Ym7-LJ-eQp"/>
@@ -804,6 +824,7 @@ CA
                 <outlet property="subFont" destination="rme-fr-5rr" id="fU3-xp-rD9"/>
                 <outlet property="subMenu" destination="EKp-Qx-4Mn" id="BeV-rZ-uYC"/>
                 <outlet property="subTrackMenu" destination="16p-PA-x34" id="yGc-SC-6rd"/>
+                <outlet property="useNewSettingsWindow" destination="DrD-Zh-yWp" id="9gV-gc-R5C"/>
                 <outlet property="videoFilters" destination="PyY-pR-jz7" id="QII-9H-SQV"/>
                 <outlet property="videoMenu" destination="HyV-fh-RgO" id="NtM-fw-Y8Q"/>
                 <outlet property="videoTrack" destination="j8P-Gb-HR7" id="hho-ys-R88"/>
@@ -819,8 +840,14 @@ CA
                         <action selector="openFile:" target="Voe-Tx-rLC" id="Zlo-gp-oIk"/>
                     </connections>
                 </menuItem>
+                <menuItem title="Open URL…" id="Qwb-26-zjX">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                    <connections>
+                        <action selector="openURL:" target="Voe-Tx-rLC" id="vSz-YP-8UA"/>
+                    </connections>
+                </menuItem>
             </items>
-            <point key="canvasLocation" x="18.5" y="678.5"/>
+            <point key="canvasLocation" x="18" y="689.5"/>
         </menu>
         <customObject id="wTK-gz-aTs" customClass="SPUStandardUpdaterController">
             <connections>

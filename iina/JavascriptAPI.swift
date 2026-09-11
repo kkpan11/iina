@@ -66,7 +66,7 @@ class JavascriptAPI: NSObject {
       path.hasPrefix("@video/") ? .video :
       path.hasPrefix("@audio/") ? .audio :
       path.hasPrefix("@sub") ? .sub : nil
-    if player != nil, let trackType = trackType {
+    if player != nil, let trackType {
       if let path = trackPath(path, type: trackType) {
         return (path, false)
       } else {
@@ -76,7 +76,7 @@ class JavascriptAPI: NSObject {
 
     return whenPermitted(to: .accessFileSystem) {
       var absPath = path
-      if let player = player, path.hasPrefix("@current/") {
+      if let player, path.hasPrefix("@current/") {
         guard let currentURL = player.info.currentURL else {
           log("@current is unavailable when no file playing", level: .error)
           return (nil, false)
@@ -90,12 +90,16 @@ class JavascriptAPI: NSObject {
         throwError(withMessage: "The path should be an absolute path: \(path)")
         return (nil, false)
       }
-      return (absPath, false)
+      return (
+        absPath,
+        absPath.hasPrefix(pluginInstance.plugin.dataURL.path) ||
+        absPath.hasPrefix(pluginInstance.plugin.tmpURL.path)
+      )
     }!
   }
 
   private func trackPath(_ path: String, type: MPVTrack.TrackType) -> String? {
-    guard let player = player else { return nil }
+    guard let player else { return nil }
 
     guard let strId = path.split(separator: "/", maxSplits: 2).last, let id = Int(strId) else {
       throwError(withMessage: "The path \(path) is invalid")

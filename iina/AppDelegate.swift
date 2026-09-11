@@ -109,16 +109,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   // MARK: - Logs
-  private let observedPrefKeys: [Preference.Key] = [.logLevel]
+  private let observedPrefKeys: [Preference.Key] = [.logLevel, .thumbnailWidth]
 
   override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-    guard let keyPath = keyPath, let change = change else { return }
+    guard let keyPath, let change else { return }
 
     switch keyPath {
     case Preference.Key.logLevel.rawValue:
       if let newValue = change[.newKey] as? Int {
         Logger.Level.preferred = Logger.Level(rawValue: newValue.clamped(to: 0...3))!
       }
+    case Preference.Key.thumbnailWidth.rawValue:
+      ThumbnailCache.clearThumbnailCache()
 
     default:
       return
@@ -155,12 +157,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   /// Certain IINA capabilities, such as hardware acceleration, are contingent upon aspects of the Mac IINA is running on. If available,
   /// this method will log:
   /// - macOS version
-  /// - model identifier of the Mac
-  /// - kind of processor
+  /// - Model identifier of the Mac
+  /// - Kind of processor chip
+  /// - Amount of physical memory
+  /// - Thermal state
+  /// - Whether low power mode is active
+  /// - Note: At this time IINA does not listen for changes to the thermal state or whether low power mode is active or not. For now
+  ///         this information is only logged at startup. That might change if some correlation between these states and IINA's
+  ///         behavior is seen.
   private func logPlatformDetails() {
     Logger.log("Running under macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
-    guard let cpu = Sysctl.shared.machineCpuBrandString, let model = Sysctl.shared.hwModel else { return }
-    Logger.log("On a \(model) with an \(cpu) processor")
+    if let cpu = Sysctl.shared.machineCpuBrandString, let model = Sysctl.shared.hwModel {
+      let memory = ProcessInfo.processInfo.physicalMemory / 1073741824
+      Logger.log("On a \(model) with an \(cpu) processor and \(memory) GiB of RAM")
+    }
+    let thermalState = ProcessInfo.processInfo.thermalState
+    if thermalState != .nominal {
+      Logger.log("Thermal state: \(thermalState)")
+    }
+    if #available(macOS 12, *), ProcessInfo.processInfo.isLowPowerModeEnabled {
+      Logger.log("Low Power Mode is active")
+    }
+  }
+
+  /// Log all the available [screens](https://developer.apple.com/documentation/appkit/nsscreen) and all the
+  /// connected displays.
+  private func logScreenDetails() {
+    DisplayController.shared.addNewDisplays()
+    NSScreen.screens.enumerated().forEach { screen in
+      NSScreen.log("NSScreen.screens[\(screen.offset)]" , screen.element)
+    }
   }
 
   // MARK: - SPUUpdaterDelegate
@@ -207,6 +233,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
     logBuildDetails()
     logPlatformDetails()
+    logScreenDetails()
+    Preference.logSettings()
 
     Logger.log("App will launch")
 
@@ -221,12 +249,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     // register for url event
     NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(self.handleURLEvent(event:withReplyEvent:)), forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
 
-    // Check for legacy pref entries and migrate them to their modern equivalents
+    // Check for legacy pref entries and migrate them to their modern equivalents.
     LegacyMigration.shared.migrateLegacyPreferences()
+    LegacyMigration.shared.migrateToneMappingTargetPeak()
 
     // guide window
-    if FirstRunManager.isFirstRun(for: .init("firstLaunchAfter\(version)")) {
-      guideWindow.show(pages: [.highlights])
+    switch InfoDictionary.shared.buildType {
+    case .release, .beta:
+      if FirstRunManager.isFirstRun(for: .init("firstLaunchAfter\(version)")) {
+        guideWindow.show(pages: [.highlights])
+      }
+    default:
+      break
     }
 
     // Hide Window > "Enter Full Screen" menu item, because this is already present in the Video menu
@@ -403,6 +437,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     NSApplication.shared.servicesProvider = self
 
     AppDelegate.shared.menuController?.updatePluginMenu()
+
+    MemoryUsage.shared.logUsage("after launching finished")
   }
 
   /** Show welcome window if `application(_:openFile:)` wasn't called, i.e. launched normally. */
@@ -458,6 +494,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     Logger.log("App should terminate")
     isTerminating = true
+    MemoryUsage.shared.logUsage("before terminating")
 
     // Normally termination happens fast enough that the user does not have time to initiate
     // additional actions, however to be sure shutdown further input from the user.
@@ -736,15 +773,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
       return
     }
     let urls = pendingFilesForOpenFile.map { URL(fileURLWithPath: $0) }
-    
+    pendingFilesForOpenFile.removeAll()
+
     // if installing a plugin package
     if let pluginPackageURL = urls.first(where: { $0.pathExtension == "iinaplgz" }) {
-      preferenceWindowController.performAction(.installPlugin(url: pluginPackageURL))
+      if Preference.enableNewSettings {
+        SettingsWindow.default.installPlugin(localPackageURL: pluginPackageURL)
+      } else {
+        preferenceWindowController.performAction(.installPlugin(url: pluginPackageURL))
+      }
       return
     }
 
     // open pending files
-    pendingFilesForOpenFile.removeAll()
     if PlayerCore.openURLs(urls) == 0 {
       Utility.showAlert("nothing_to_open")
     }
@@ -860,7 +901,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
       // enqueue
       let playlistEmpty = PlayerCore.lastActive.info.$playlist.withLock { $0.isEmpty }
       if let enqueueValue = queryDict["enqueue"], enqueueValue == "1", !playlistEmpty {
-        PlayerCore.lastActive.addToPlaylist(urlValue)
+        PlayerCore.lastActive.appendToPlaylist(urlValue)
         PlayerCore.lastActive.postNotification(.iinaPlaylistChanged)
         PlayerCore.lastActive.sendOSD(.addToPlaylist(1))
       } else {
@@ -880,6 +921,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
       for query in queries {
         if query.name.hasPrefix("mpv_") {
           let mpvOptionName = String(query.name.dropFirst(4))
+          guard safeMPVOptions.contains(mpvOptionName) else {
+            Logger.log("mpv option \(mpvOptionName) rejected when parsing URL", level: .warning)
+            continue
+          }
           guard let mpvOptionValue = query.value else { continue }
           Logger.log("Setting \(mpvOptionName) to \(mpvOptionValue)")
           player.mpv.setString(mpvOptionName, mpvOptionValue)
@@ -906,8 +951,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
           noteNewRecentDocumentURL(url)
         }
       }
-      let isAlternative = (sender as? NSMenuItem)?.tag == AlternativeMenuItemTag
-      if PlayerCore.openURLs(panel.urls, inverseOpenInNewWindowPref: isAlternative) == 0 {
+      if PlayerCore.openURLs(panel.urls) == 0 {
         Utility.showAlert("nothing_to_open")
       }
     }
@@ -938,11 +982,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   @IBAction func showPreferences(_ sender: AnyObject) {
-    preferenceWindowController.showWindow(self)
+    if Preference.enableNewSettings {
+      SettingsWindow.default.show()
+    } else {
+      preferenceWindowController.showWindow(self)
+    }
   }
 
   @objc func showPluginPreferences(_ sender: NSMenuItem) {
-    preferenceWindowController.openPreferenceView(withNibName: "PrefPluginViewController")
+    if Preference.enableNewSettings {
+      SettingsWindow.default.show()
+      SettingsWindow.default.navigateTo(page: "plugin")
+    } else {
+      preferenceWindowController.openPreferenceView(withNibName: "PrefPluginViewController")
+    }
   }
 
   @IBAction func showVideoFilterWindow(_ sender: AnyObject) {
@@ -979,6 +1032,78 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
   @IBAction func websiteAction(_ sender: AnyObject) {
     NSWorkspace.shared.open(URL(string: AppData.websiteLink)!)
+  }
+
+  @objc func reloadAllPlugins(_ sender: NSMenuItem) {
+    // Remove the developer tool menu item that retains the plugin instance
+    AppDelegate.shared.menuController.pluginMenu.items
+      .compactMap { $0.submenu }.flatMap { $0.items }
+      .forEach { $0.representedObject = nil }
+    AppDelegate.shared.menuController.pluginMenu.removeAllItems()
+
+    for player in PlayerCore.playerCores {
+      player.clearPlugins()
+    }
+
+    JavascriptPlugin.recreateAllPlugins()
+    JavascriptPlugin.loadGlobalInstances()
+
+    for player in PlayerCore.playerCores {
+      for plugin in JavascriptPlugin.plugins {
+        player.reloadPlugin(plugin, forced: true)
+      }
+      // Try to emit the events that are already emitted.
+      // Of course this is not exhaustive, so users shouldn't rely on this function
+      if player.mainWindow.loaded {
+        player.events.emit(.windowLoaded)
+      }
+      player.events.emit(.mpvInitialized)
+      if player.info.state == .playing {
+        player.events.emit(.fileLoaded)
+        player.events.emit(.fileStarted)
+      }
+    }
+  }
+  
+  @objc func toggleNewSettings(_ sender: AnyObject) {
+    Preference.enableNewSettings = !Preference.enableNewSettings
+  }
+
+  /// Dump contents of all player cores to a txt file. Strictly for debugging. No localization needed.
+  @IBAction func dumpDebugInfo(_ sender: AnyObject) {
+    struct FileStream: TextOutputStream {
+      let handle: FileHandle
+      mutating func write(_ string: String) {
+        handle.write(Data(string.utf8))
+      }
+    }
+
+    let alert = NSAlert()
+    let path = NSString(string: "~/Downloads/iina-debug-dump-\(Date.timeIntervalSinceReferenceDate).txt").expandingTildeInPath
+    let url = URL(fileURLWithPath: path)
+    FileManager.default.createFile(atPath: path, contents: nil)
+    guard let handle = try? FileHandle(forWritingTo: url) else {
+      alert.messageText = "Error"
+      alert.informativeText = "Cannot get file handle at \(path)."
+      alert.alertStyle = .critical
+      alert.runModal()
+      return
+    }
+
+    var stream = FileStream(handle: handle)
+    for player in PlayerCore.playerCores {
+      dump(player, to: &stream)
+      stream.write("\n\n")
+    }
+
+    alert.messageText = "Completed"
+    alert.informativeText = """
+      Dumped debug info to \(path).\n
+      The file contains filenames and URLs in your playlist! \
+      For your privacy, please consider removing them before sharing.
+      """
+    alert.alertStyle = .informational
+    alert.runModal()
   }
 
   private func registerUserDefaultValues() {
@@ -1244,6 +1369,65 @@ class RemoteCommandController {
 
   private var isEnabled = false
 
+  /// Returns the value to use for the [preferredIntervals](https://developer.apple.com/documentation/mediaplayer/mpskipintervalcommand/preferredintervals) property.
+  ///
+  /// The [MPRemoteCommandCenter](https://developer.apple.com/documentation/MediaPlayer/MPRemoteCommandCenter)
+  /// expects the media keys tied to the  [seekBackwardCommand](https://developer.apple.com/documentation/mediaplayer/mpremotecommandcenter/seekbackwardcommand) and the [seekForwardCommand](https://developer.apple.com/documentation/mediaplayer/mpremotecommandcenter/seekforwardcommand) to seek backward and
+  /// forward in the current media track. The
+  /// [MPSkipIntervalCommand](https://developer.apple.com/documentation/mediaplayer/mpskipintervalcommand)
+  /// property [preferredIntervals](https://developer.apple.com/documentation/mediaplayer/mpskipintervalcommand/preferredintervals) provides the number of
+  /// seconds pressing the key will skip.
+  ///
+  /// IINA allows the user to bind a mpv command to the `FORWARD` and `REWIND` media keys. This method must:
+  /// - Determine if there is a key binding for the given key and if not return the default of 15 seconds
+  /// - Determine if the key is bound to an IINA command and if so return an empty array indicating the property is not applicable
+  /// - Determine if the key is bound to the mpv
+  ///     [seek](https://mpv.io/manual/stable/#command-interface-seek-%3Ctarget%3E-[%3Cflags%3E]) command
+  ///     and if not, return an empty array
+  /// - Parse the `target` value of the `seek` command as an integer, if it cannot be parsed log an error and  return an empty array
+  /// - If present, parse the `seek` command flags and if any flags other than `exact`, `keyframes` and `relative` are
+  ///     present then return an empty array as this is not a normal seek
+  /// - When all the above checks pass the key has been bound to a normal seek command and the absolute value of the seek
+  ///     command target parameter can be used as the interval
+  ///
+  /// To see the `preferredIntervals` value open
+  /// [Control Center](https://support.apple.com/guide/mac-help/quickly-change-settings-mchl50f94f8f/mac)
+  /// and double click on the Now Playing module with IINA playing media. The expanded Now Playing module will contain seek
+  /// backward and seek forward buttons. The interval may be shown inside the button icons.
+  /// - Parameter key: Media key the value is for.
+  /// - Returns: Value to use for` preferredIntervals`.
+  private func formPreferredIntervalsValue(_ key: String) -> [NSNumber] {
+    guard let keyBinding = PlayerCore.keyBindings[key] else { return [15] }
+    guard !keyBinding.isIINACommand else { return [] }
+    let action = keyBinding.action
+    guard action.count > 1, action[0] == MPVCommand.seek.rawValue else { return [] }
+    guard let target = Double(action[1]) else {
+      log("""
+          Unable to parse seek target as a Double in key binding:
+              \(key) \(keyBinding.rawAction)
+          """, level: .error)
+      return []
+    }
+    if action.count > 2 {
+      let allowedFlags: Set<String> = ["exact", "keyframes", "relative"]
+      // Multiple flags can be composed using `+`, and each one must be valid
+      let flags = action[2].split(separator: "+")
+
+      guard flags.allSatisfy({ allowedFlags.contains(String($0)) }) else {
+        log("""
+            Seek flag was not one of \(allowedFlags.map({ "'\($0)'" }).joined(separator: ", ")), not setting seek interval:
+                \(key) \(keyBinding.rawAction)
+            """)
+        return []
+      }
+    }
+    // The seek command target may be negative to indicate seeking backwards, however the remote
+    // command dictates the direction and requires that the interval to be positive.
+    let seconds = abs(target)
+    log("Seek interval for the \(key) key is \(seconds) s")
+    return [NSNumber(value: seconds)]
+  }
+
   func disable() {
     guard isEnabled else { return }
     commands.forEach { $0.removeTarget(nil) }
@@ -1254,28 +1438,72 @@ class RemoteCommandController {
   func enable() {
     guard RemoteCommandController.useSystemMediaControl, !isEnabled else { return }
     let remoteCommand = MPRemoteCommandCenter.shared()
+
+    // For each command, apply a configured keybinding or fallback to default values.
     remoteCommand.playCommand.addTarget { _ in
-      PlayerCore.lastActive.resume()
+      if let action = PlayerCore.keyBindings["PLAYONLY"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.resume()
+      }
       return .success
     }
     remoteCommand.pauseCommand.addTarget { _ in
-      PlayerCore.lastActive.pause()
+      if let action = PlayerCore.keyBindings["PAUSEONLY"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.pause()
+      }
       return .success
     }
     remoteCommand.togglePlayPauseCommand.addTarget { _ in
-      PlayerCore.lastActive.togglePause()
+      if let action = PlayerCore.keyBindings["PLAYPAUSE"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.togglePause()
+      }
       return .success
     }
     remoteCommand.stopCommand.addTarget { _ in
-      PlayerCore.lastActive.stop()
+      if let action = PlayerCore.keyBindings["STOP"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.stop()
+      }
       return .success
     }
     remoteCommand.nextTrackCommand.addTarget { _ in
-      PlayerCore.lastActive.navigateInPlaylist(nextMedia: true)
+      if let action = PlayerCore.keyBindings["NEXT"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.navigateInPlaylist(nextMedia: true)
+      }
       return .success
     }
     remoteCommand.previousTrackCommand.addTarget { _ in
-      PlayerCore.lastActive.navigateInPlaylist(nextMedia: false)
+      if let action = PlayerCore.keyBindings["PREV"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.navigateInPlaylist(nextMedia: false)
+      }
+      return .success
+    }
+    remoteCommand.skipForwardCommand.preferredIntervals = formPreferredIntervalsValue("FORWARD")
+    remoteCommand.skipForwardCommand.addTarget { event in
+      if let action = PlayerCore.keyBindings["FORWARD"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.seek(relativeSecond: (event as! MPSkipIntervalCommandEvent).interval, option: .exact)
+      }
+      return .success
+    }
+    remoteCommand.skipBackwardCommand.preferredIntervals = formPreferredIntervalsValue("REWIND")
+    remoteCommand.skipBackwardCommand.addTarget { event in
+      if let action = PlayerCore.keyBindings["REWIND"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.seek(relativeSecond: -(event as! MPSkipIntervalCommandEvent).interval, option: .exact)
+      }
       return .success
     }
     remoteCommand.changeRepeatModeCommand.addTarget { _ in
@@ -1285,16 +1513,6 @@ class RemoteCommandController {
     remoteCommand.changePlaybackRateCommand.supportedPlaybackRates = [0.5, 1, 1.5, 2]
     remoteCommand.changePlaybackRateCommand.addTarget { event in
       PlayerCore.lastActive.setSpeed(Double((event as! MPChangePlaybackRateCommandEvent).playbackRate))
-      return .success
-    }
-    remoteCommand.skipForwardCommand.preferredIntervals = [15]
-    remoteCommand.skipForwardCommand.addTarget { event in
-      PlayerCore.lastActive.seek(relativeSecond: (event as! MPSkipIntervalCommandEvent).interval, option: .exact)
-      return .success
-    }
-    remoteCommand.skipBackwardCommand.preferredIntervals = [15]
-    remoteCommand.skipBackwardCommand.addTarget { event in
-      PlayerCore.lastActive.seek(relativeSecond: -(event as! MPSkipIntervalCommandEvent).interval, option: .exact)
       return .success
     }
     remoteCommand.changePlaybackPositionCommand.addTarget { event in
@@ -1307,7 +1525,7 @@ class RemoteCommandController {
 
   // MARK: - Private Functions
 
-  private func log(_ message: String, level: Logger.Level = .debug) {
+  private func log(_ message: @autoclosure () -> String, level: Logger.Level = .debug) {
     Logger.log(message, level: level, subsystem: Logger.Sub.nowPlaying)
   }
 
@@ -1326,5 +1544,101 @@ class RemoteCommandController {
       remoteCommand.skipForwardCommand,
       remoteCommand.stopCommand,
       remoteCommand.togglePlayPauseCommand]
+
+    NotificationCenter.default.addObserver(forName: .iinaGlobalKeyBindingsChanged, object: nil,
+                                           queue: .main) { [unowned self] _ in
+      guard isEnabled else { return }
+      // The user has modified the key bindings, possibly changing the mpv commands associated with
+      // the FORWARD and REWIND media keys. The preferredIntervals values are set based on the mpv
+      // commands assigned to those keys. The Now Playing module may display the interval in the
+      // seek backward and seek forward buttons causing the value displayed in the Now Playing
+      // module buttons to to be out of date. Merely updating the preferredIntervals values is
+      // insufficient to get the Now Playing module to update its buttons. Support for media keys
+      // and remote commands must be disabled and then re-enabled.
+      log("Restarting support for remote commands due to changes to key bindings")
+      disable()
+      // Immediately re-enabling media keys and remote commands only partially worked. The Now
+      // Playing module would update buttons if the module was expanded, but the buttons shown in
+      // the module's small form would still display the old interval. Work around this curious
+      // Now Playing behavior by delaying the re-enabling.
+      DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + 1) { self.enable() }
+    }
   }
 }
+
+extension ProcessInfo.ThermalState: @retroactive CustomStringConvertible {
+  public var description: String {
+    switch self {
+    case .nominal:
+      "nominal"
+    case .fair:
+      "fair"
+    case .serious:
+      "serious"
+    case .critical:
+      "critical"
+    @unknown default:
+      "unknown"
+    }
+  }
+}
+
+
+/// A list of mpv options that should be allowed in the URL scheme.
+/// Ensure absolutely no possibility of local file read/write.
+fileprivate let safeMPVOptions = Set([
+  // track selection
+  "aid", "vid", "sid", "secondary-sid",
+  "alang", "slang", "vlang", "edition", "track-auto-selection",
+  "subs-with-matching-audio", "subs-match-os-language", "subs-fallback", "subs-fallback-forced",
+  // playback control
+  "start", "end", "length", "frames", "speed", "pitch", "pause", "sstep", "correct-pts", "container-fps-override",
+  "loop-file", "loop-playlist", "ab-loop-a", "ab-loop-b", "ab-loop-count", "play-direction",
+  "rebase-start-time", "hr-seek", "hr-seek-framedrop",
+  // video
+  "deinterlace", "deinterlace-field-parity", "hwdec", "hwdec-codecs",
+  "video-aspect-override", "video-aspect-method", "video-rotate", "video-crop",
+  "video-zoom", "video-pan-x", "video-pan-y", "video-align-x", "video-align-y",
+  "video-unscaled", "video-scale-x", "video-scale-y", "video-recenter",
+  "video-margin-ratio-left", "video-margin-ratio-right", "video-margin-ratio-top", "video-margin-ratio-bottom",
+  "video-output-levels", "panscan", "framedrop", "video-latency-hacks", "display-fps-override",
+  "vd-lavc-skiploopfilter", "vd-lavc-skipidct", "vd-lavc-skipframe", "vd-lavc-threads", "vd-lavc-framedrop", "vd-lavc-fast", "vd-lavc-film-grain", "vd-lavc-dr",
+  "vd-apply-cropping", "hwdec-extra-frames", "hwdec-image-format", "hwdec-threads", "hwdec-software-fallback", "vd-lavc-check-hw-profile", "swapchain-depth",
+  "brightness", "contrast", "saturation", "gamma", "hue",
+  // audio
+  "volume", "volume-max", "volume-gain", "volume-gain-max", "volume-gain-min", "mute",
+  "audio-delay", "audio-pitch-correction", "audio-channels", "audio-display",
+  "audio-samplerate", "audio-format", "audio-exclusive", "audio-spdif",
+  "gapless-audio", "initial-audio-sync", "replaygain", "replaygain-preamp", "replaygain-clip", "replaygain-fallback",
+  "ad-lavc-ac3drc", "ad-lavc-downmix", "ad-lavc-threads",
+  "audio-stream-silence", "audio-wait-open", "audio-buffer", "audio-normalize-downmix", "audio-set-media-role",
+  // subtitles
+  "sub-delay", "secondary-sub-delay",
+  "sub-scale", "sub-scale-signs", "sub-scale-by-window", "sub-scale-with-window", "sub-ass-scale-with-window",
+  "sub-pos", "secondary-sub-pos", "sub-speed", "sub-visibility", "secondary-sub-visibility",
+  "sub-ass", "sub-ass-justify",
+  "sub-ass-override", "secondary-sub-ass-override", "sub-ass-force-margins", "sub-use-margins",
+  "sub-ass-use-video-data", "sub-vsfilter-bidi-compat", "sub-ass-vsfilter-color-compat",
+  "sub-font", "sub-font-size", "sub-color", "sub-outline-color", "sub-outline-size", "sub-back-color",
+  "sub-shadow-offset", "sub-bold", "sub-italic", "sub-blur",
+  "sub-margin-x", "sub-margin-y", "sub-align-x", "sub-align-y", "sub-justify",
+  "sub-border-style", "sub-spacing", "sub-line-spacing", "sub-hinting", "sub-shaper",
+  "sub-codepage", "sub-fix-timing", "sub-fix-timing-threshold", "sub-fix-timing-keep",
+  "sub-stretch-durations", "sub-gauss", "sub-gray", "sub-forced-events-only", "sub-fps",
+  "sub-filter-sdh", "sub-filter-sdh-harder", "sub-filter-sdh-enclosures",
+  "sub-clear-on-seek", "sub-create-cc-track", "sub-past-video-end", "sub-font-provider", "sub-hdr-peak", "image-subs-hdr-peak",
+  "sub-ass-style-overrides", "stretch-dvd-subs", "stretch-image-subs-to-screen", "image-subs-video-resolution",
+  "embeddedfonts", "sub-ass-video-aspect-override", "sub-ass-prune-delay", "teletext-page",
+  // window
+  "fullscreen", "geometry", "ontop", "keep-open", "keep-open-pause", "image-display-duration", "stop-screensaver",
+  // network
+  "user-agent", "referrer", "network-timeout", "tls-verify", "rtsp-transport", "hls-bitrate",
+  "cache", "cache-secs", "cache-pause", "cache-pause-wait", "cache-pause-initial", "force-seekable",
+  "http-header-fields", "cookies",
+  // demuxer, audio resampler, others
+  "demuxer-readahead-secs", "demuxer-mkv-subtitle-preroll", "demuxer-mkv-subtitle-preroll-secs",
+  "demuxer-lavf-analyzeduration", "demuxer-lavf-probescore", "demuxer-lavf-probesize",
+  "demuxer-max-bytes", "demuxer-max-back-bytes",
+  "audio-resample-filter-size", "audio-resample-phase-shift", "audio-resample-cutoff", "audio-resample-linear", "audio-resample-max-output-size",
+  "video-sync", "interpolation",
+])

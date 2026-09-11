@@ -31,6 +31,14 @@ class OpenURLWindowController: NSWindowController, NSTextFieldDelegate, NSContro
   var playerCore: PlayerCore?
   var loadingURL: String?
 
+  private var invalidURLMessage: String {
+    NSLocalizedString("alert.invalid_url", comment: "The URL is invalid.")
+  }
+
+  private var failedToOpenURLMessage: String {
+    NSLocalizedString("alert.error_open", comment: "Cannot open file or stream!")
+  }
+
   override func windowDidLoad() {
     super.windowDidLoad()
     window?.isMovableByWindowBackground = true
@@ -48,6 +56,8 @@ class OpenURLWindowController: NSWindowController, NSTextFieldDelegate, NSContro
   func showLoadingScreen(playerCore: PlayerCore) {
     _ = window
     overlayView.isHidden = false
+    // Must not leave the focus in the username or password text fields.
+    window?.makeFirstResponder(nil)
     self.playerCore = playerCore
     loadingURL = playerCore.info.currentURL?.absoluteString
     if #available(macOS 14, *) {
@@ -61,6 +71,7 @@ class OpenURLWindowController: NSWindowController, NSTextFieldDelegate, NSContro
   func failedToLoadURL() {
     guard isWindowLoaded && window?.isVisible == true else { return }
     urlField.stringValue = loadingURL ?? ""
+    errorMessageLabel.stringValue = failedToOpenURLMessage
     errorMessageLabel.isHidden = false
     overlayView.isHidden = true
     urlField.textColor = .systemRed
@@ -68,8 +79,11 @@ class OpenURLWindowController: NSWindowController, NSTextFieldDelegate, NSContro
 
   func resetWindowState() {
     urlField.stringValue = ""
+    urlField.textColor = .labelColor
     usernameField.stringValue = ""
     passwordField.stringValue = ""
+    errorMessageLabel.stringValue = invalidURLMessage
+    errorMessageLabel.isHidden = true
     rememberPasswordCheckBox.state = .off
     urlStackView.setVisibilityPriority(.notVisible, for: httpPrefixTextField)
     window?.makeFirstResponder(urlField)
@@ -115,6 +129,8 @@ class OpenURLWindowController: NSWindowController, NSTextFieldDelegate, NSContro
                                   port: url.port)
       }
       overlayView.isHidden = false
+      // Must not leave the focus in the username or password text fields.
+      window?.makeFirstResponder(nil)
       playerCore = PlayerCore.activeOrNewForMenuAction(isAlternative: isAlternativeAction)
       playerCore!.openURL(url)
     } else {
@@ -163,13 +179,15 @@ class OpenURLWindowController: NSWindowController, NSTextFieldDelegate, NSContro
 
   func controlTextDidChange(_ obj: Notification) {
     if let textView = obj.userInfo?["NSFieldEditor"] as? NSTextView, let str = textView.textStorage?.string, str.isEmpty {
+      errorMessageLabel.stringValue = invalidURLMessage
       errorMessageLabel.isHidden = true
+      urlField.textColor = .labelColor
       urlStackView.setVisibilityPriority(.notVisible, for: httpPrefixTextField)
       openButton.isEnabled = true
       return
     }
     let (url, hasScheme) = getURL()
-    if let url = url, let host = url.host {
+    if let url, let host = url.host {
       errorMessageLabel.isHidden = true
       urlField.textColor = .labelColor
       openButton.isEnabled = true
@@ -188,6 +206,7 @@ class OpenURLWindowController: NSWindowController, NSTextFieldDelegate, NSContro
       }
     } else {
       urlField.textColor = .systemRed
+      errorMessageLabel.stringValue = invalidURLMessage
       errorMessageLabel.isHidden = false
       urlStackView.setVisibilityPriority(.notVisible, for: httpPrefixTextField)
       openButton.isEnabled = false

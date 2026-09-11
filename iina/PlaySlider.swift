@@ -39,23 +39,32 @@ final class PlaySlider: NSSlider {
 
   private var abLoopBKnob: PlaySliderLoopKnob!
 
-  // MARK:- Initialization
+  // MARK: - Initialization
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    cell = PlaySliderCell()
+    commonInit()
+  }
 
   required init?(coder: NSCoder) {
     super.init(coder: coder)
-    if #available(macOS 11, *) {
-      // Apple increased the height of sliders in Big Sur. Until we have time to restructure the
-      // on screen controller to accommodate a larger slider reduce the size of the slider from
-      // regular to small. This makes the slider match the behavior seen under Catalina. This MUST
-      // be set before creating the loop knobs as it changes the height of knobs which is referenced
-      // during loop knob initialization.
-      controlSize = .small
-    }
+    commonInit()
+  }
+
+  private func commonInit() {
+    // Apple increased the height of sliders in Big Sur. Until we have time to restructure the
+    // on screen controller to accommodate a larger slider reduce the size of the slider from
+    // regular to small. This makes the slider match the behavior seen under Catalina. This MUST
+    // be set before creating the loop knobs as it changes the height of knobs which is referenced
+    // during loop knob initialization.
+    controlSize = .small
+
     abLoopAKnob = PlaySliderLoopKnob(slider: self, toolTip: "A-B loop A")
     abLoopBKnob = PlaySliderLoopKnob(slider: self, toolTip: "A-B loop B")
   }
 
-  // MARK:- Drawing
+  // MARK: - Drawing
 
   /// Draw the slider.
   ///
@@ -91,5 +100,30 @@ final class PlaySlider: NSSlider {
     // thought the NSView method would do this. The current Apple documentation does not say what
     // the NSView method does or even if it needs to be called by subclasses.
     needsDisplay = true
+  }
+
+  // MARK: - Mouse / Trackpad events
+
+  /// Informs the receiver that the user has pressed the left mouse button.
+  ///
+  /// This is a workaround for IINA issue #5768 where starting with macOS Tahoe AppKit is miss-handling mouse events in certain
+  /// circumstances. Merely adding this function solved the problem. Maybe the presence of this function prevents the use of some sort
+  /// of faulty optimization?
+  /// - Important: _DO NOT REMOVE_ this function thinking it is not needed. Read issue #5768.
+  /// - Parameter event: An object encapsulating information about the mouse-down event.
+  override func mouseDown(with event: NSEvent) {
+    super.mouseDown(with: event)
+  }
+
+  /// The user is scrolling while the cursor is within the slider.
+  ///
+  /// With certain kinds of input devices, such as a mouse with a scroll wheel that spins freely, it is easy to accidentally move the cursor
+  /// over the slider and unintentionally change the playback position. For users that dislike this behavior IINA provides a setting to
+  /// disable scrolling the slider. When this setting is enabled the user must grab and drag the slider's thumb to change the playback
+  /// position or click on a position within the slider.
+  /// - Parameter event: Event indicating the scroll wheel position changed.
+  override func scrollWheel(with event: NSEvent) {
+    guard !Preference.bool(for: .disablePlaySliderScrolling) else { return }
+    super.scrollWheel(with: event)
   }
 }

@@ -53,8 +53,12 @@ class MPVOptionDefaults {
       return
     }
     logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadAutoProfiles, "no"))
-    logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadOsdConsole, "no"))
+    logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadCommands, "no"))
+    logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadConsole, "no"))
+    logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadContextMenu, "no"))
+    logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadPositioning, "no"))
     logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadScripts, "no"))
+    logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadSelect, "no"))
     logError(mpv_set_option_string(mpv, MPVOption.ProgramBehavior.loadStatsOverlay, "no"))
     logError(mpv_initialize(mpv))
   }
@@ -133,7 +137,7 @@ class MPVOptionDefaults {
     return errorCode
   }
 
-  private static func log(_ message: String, level: Logger.Level = .debug) {
+  private static func log(_ message: @autoclosure () -> String, level: Logger.Level = .debug) {
     Logger.log(message, level: level, subsystem: Logger.Sub.mpvDefaults)
   }
 }

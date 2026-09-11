@@ -9,16 +9,53 @@
 /// Available constants in OSD messages:
 ///
 /// {{duration}}
+/// {{preciseDuration}}
 /// {{position}}
+/// {{precisePosition}}
 /// {{percentPos}}
 /// {{currChapter}}
 /// {{chapterCount}}
 
 import Foundation
 
+
 fileprivate func toPercent(_ value: Double, _ bound: Double) -> Double {
   return (value + bound).clamped(to: 0...(bound * 2)) / (bound * 2)
 }
+
+
+fileprivate func makeAttributedString(
+  part1: String,
+  fontSize part1FontSize: CGFloat,
+  isSecondary part1IsSecondary: Bool,
+  part2: String,
+  fontSize part2FontSize: CGFloat,
+  isSecondary part2IsSecondary: Bool,
+) -> NSAttributedString? {
+  let attrString = NSMutableAttributedString()
+  attrString.append(NSAttributedString(string: part1, attributes: [
+    .font: NSFont.monospacedDigitSystemFont(ofSize: part1FontSize, weight: .regular),
+    .foregroundColor: part1IsSecondary ? NSColor.secondaryLabelColor : NSColor.labelColor,
+  ]))
+  attrString.append(NSAttributedString(string: part2, attributes: [
+    .font: NSFont.monospacedDigitSystemFont(ofSize: part2FontSize, weight: .regular),
+    .foregroundColor: part2IsSecondary ? NSColor.secondaryLabelColor : NSColor.labelColor,
+  ]))
+  return attrString
+}
+
+
+fileprivate func defaultAttributedString(_ string: String, separator: Character, fontSize: CGFloat, smallFontSize: CGFloat) -> NSAttributedString? {
+  let parts = string.split(separator: separator, maxSplits: 1)
+  if parts.count == 2 {
+    return makeAttributedString(
+      part1: String(parts[0]), fontSize: smallFontSize, isSecondary: true,
+      part2: String(parts[1]), fontSize: fontSize, isSecondary: false,
+    )
+  }
+  return nil
+}
+
 
 enum OSDType {
   case normal
@@ -26,7 +63,6 @@ enum OSDType {
   case withProgress(Double)
   case withPosition(Double)
   case withLeftToRightText(String)
-//  case withButton(String)
 }
 
 enum OSDMessage {
@@ -35,8 +71,9 @@ enum OSDMessage {
 
   case pause
   case resume
-  case seek(String, Double)  // text, percentage
-  case volume(Int)
+  case seek(String, String, Double)  // current, total, percentage
+  case showTime(Double) // percentage
+  case volume(Double)
   case speed(Double)
   case aspect(String)
   case crop(String)
@@ -84,6 +121,7 @@ enum OSDMessage {
   case canceled
   case cannotConnect
   case timedOut
+  case onlineSubQuotaExceeded(String?)
 
   case fileLoop
   case playlistLoop
@@ -122,6 +160,7 @@ enum OSDMessage {
     case .fileError: fallthrough
     case .foundSub: fallthrough
     case .networkError: fallthrough
+    case .onlineSubQuotaExceeded: fallthrough
     case .savedSub: fallthrough
     case .startFindingSub: fallthrough
     case .timedOut:
@@ -130,7 +169,7 @@ enum OSDMessage {
     }
   }
 
-  func message() -> (String, OSDType) {
+  func titleAndType() -> (String, OSDType) {
     switch self {
     case .fileStart(let filename):
       return (filename, .normal)
@@ -143,14 +182,15 @@ enum OSDMessage {
       return (NSLocalizedString("osd.resume", comment: "Resume"),
               .withLeftToRightText("{{position}} / {{duration}}"))
 
-    case .seek(let text, let percent):
-      return (text, .withPosition(percent))
+    case .seek(let current, let total, let percent):
+      return (current + " / " + total, .withPosition(percent))
+
+    case .showTime(let percent):
+      return ("{{precisePosition}} / {{preciseDuration}}", .withPosition(percent))
 
     case .volume(let value):
-      return (
-        String(format: NSLocalizedString("osd.volume", comment: "Volume: %i"), value),
-        .withProgress(Double(value) / Double(Preference.integer(for: .maxVolume)))
-      )
+      let text = String(format: NSLocalizedString("osd.volume", comment: "Volume: %@"), String(format: "%.0f", value))
+      return (text, .withProgress(value / Preference.double(for: .maxVolume)))
 
     case .speed(let value):
       return (
@@ -201,8 +241,14 @@ enum OSDMessage {
           .withProgress(0.5)
         )
       } else {
-        let str = value > 0 ? String(format: NSLocalizedString("osd.audio_delay.later", comment: "Audio Delay: %fs Later"),abs(value)) : String(format: NSLocalizedString("osd.audio_delay.earlier", comment: "Audio Delay: %fs Earlier"), abs(value))
-        return (str, .withProgress(toPercent(value, 10)))
+        let valueStr = abs(value).groupedStringUpTo6Decimals
+        let text: String
+        if value > 0 {
+          text = String(format: NSLocalizedString("osd.audio_delay.later", comment: "Audio Delay: %@s Later"), valueStr)
+        } else {
+          text = String(format: NSLocalizedString("osd.audio_delay.earlier", comment: "Audio Delay: %@s Earlier"), valueStr)
+        }
+        return (text, .withProgress(toPercent(value, 10)))
       }
 
     case .secondSubDelay(let value):
@@ -212,15 +258,19 @@ enum OSDMessage {
           .withProgress(0.5)
         )
       } else {
-        let str = value > 0 ? String(format: NSLocalizedString("osd.sub_second_delay.later", comment: "Secondary Subtitle Delay: %fs Later"),abs(value)) : String(format: NSLocalizedString("osd.sub_second_delay.earlier", comment: "Secondary Subtitle Delay: %fs Earlier"), abs(value))
-        return (str, .withProgress(toPercent(value, 10)))
+        let valueStr = abs(value).groupedStringUpTo6Decimals
+        let text: String
+        if value > 0 {
+          text = String(format: NSLocalizedString("osd.sub_second_delay.later", comment: "Secondary Subtitle Delay: %@s Later"), valueStr)
+        } else {
+          text = String(format: NSLocalizedString("osd.sub_second_delay.earlier", comment: "Secondary Subtitle Delay: %@s Earlier"), valueStr)
+        }
+        return (text, .withProgress(toPercent(value, 10)))
       }
 
     case .secondSubPos(let value):
-      return (
-        String(format: NSLocalizedString("osd.sub_second_pos", comment: "Secondary Subtitle Position: %f"), value),
-        .withProgress(value / 100)
-      )
+      let text = String(format: NSLocalizedString("osd.sub_second_pos", comment: "Secondary Subtitle Position: %@"), value.groupedStringUpTo6Decimals)
+      return (text, .withProgress(value / 100))
 
     case .subDelay(let value):
       if value == 0 {
@@ -229,15 +279,19 @@ enum OSDMessage {
           .withProgress(0.5)
         )
       } else {
-        let str = value > 0 ? String(format: NSLocalizedString("osd.sub_delay.later", comment: "Subtitle Delay: %fs Later"),abs(value)) : String(format: NSLocalizedString("osd.sub_delay.earlier", comment: "Subtitle Delay: %fs Earlier"), abs(value))
-        return (str, .withProgress(toPercent(value, 10)))
+        let valueStr = abs(value).groupedStringUpTo6Decimals
+        let text: String
+        if value > 0 {
+          text = String(format: NSLocalizedString("osd.sub_delay.later", comment: "Subtitle Delay: %@s Later"), valueStr)
+        } else {
+          text = String(format: NSLocalizedString("osd.sub_delay.earlier", comment: "Subtitle Delay: %@s Earlier"), valueStr)
+        }
+        return (text, .withProgress(toPercent(value, 10)))
       }
 
     case .subPos(let value):
-      return (
-        String(format: NSLocalizedString("osd.subtitle_pos", comment: "Subtitle Position: %f"), value),
-        .withProgress(value / 100)
-      )
+      let text = String(format: NSLocalizedString("osd.subtitle_pos", comment: "Subtitle Position: %@"), value.groupedStringUpTo6Decimals)
+      return (text, .withProgress(value / 100))
 
     case .subHidden:
       return (NSLocalizedString("osd.sub_hidden", comment: "Subtitles Hidden"), .normal)
@@ -312,10 +366,8 @@ enum OSDMessage {
       return (trackTypeStr + ": " + track.readableTitle, .normal)
 
     case .subScale(let value):
-      return (
-        String(format: NSLocalizedString("osd.subtitle_scale", comment: "Subtitle Scale: %.2fx"), value),
-        .normal
-      )
+      let text = String(format: NSLocalizedString("osd.subtitle_scale", comment: "Subtitle Scale: %@x"), value.groupedStringUpTo6Decimals)
+      return (text, .normal)
 
     case .addToPlaylist(let count):
       return (
@@ -432,6 +484,18 @@ enum OSDMessage {
         .normal
       )
 
+    case .onlineSubQuotaExceeded(let resetTime):
+      let detail: String
+      if let resetTime, !resetTime.isEmpty {
+        detail = String(format: NSLocalizedString("osd.sub_quota_exceeded.detail", comment: "Try again after %@"), resetTime)
+      } else {
+        detail = NSLocalizedString("osd.sub_quota_exceeded.detail_unknown", comment: "Try again later")
+      }
+      return (
+        NSLocalizedString("osd.sub_quota_exceeded", comment: "Subtitle download limit reached"),
+        .withText(detail)
+      )
+
     case .fileLoop:
       return (
         NSLocalizedString("osd.file_loop", comment: "Enable file looping"),
@@ -456,5 +520,48 @@ enum OSDMessage {
     case .customWithDetail(let message, let detail):
       return (message, .withText(detail))
     }
+  }
+
+  func attributedTitle(_ label: String, fontSize: CGFloat, smallFontSize: CGFloat) -> NSAttributedString? {
+    switch self {
+    case .seek(let current, let total, _):
+      return makeAttributedString(
+        part1: current, fontSize: fontSize, isSecondary: false,
+        part2: " / " + total, fontSize: smallFontSize, isSecondary: true
+      )
+    case .volume, .speed, .aspect, .crop, .rotate, .deinterlace,
+        .audioDelay, .subPos, .subDelay, .secondSubPos, .secondSubDelay,
+        .brightness, .contrast, .saturation, .gamma, .hue,
+        .track, .chapter,
+        .hwdec, .abLoop, .abLoopUpdate:
+      return defaultAttributedString(label, separator: ":", fontSize: fontSize, smallFontSize: smallFontSize)
+    default:
+      return nil
+    }
+  }
+
+  func image() -> NSImage? {
+    // icons don't look great in OSDs
+    return nil
+
+//    switch self {
+//    case .volume(let val):
+//      let intVal = (Int(val / 30) + 1).clamped(to: 1...3)
+//      return .sf("speaker.wave.\(intVal).fill")
+//    case .mute: return .sf("speaker.slash.fill")
+//    case .unMute: return .sf("speaker.fill")
+//    case .speed: return .sf("chevron.forward.dotted.chevron.forward")
+//    case .pause: return .sf("pause.fill")
+//    case .resume: return .sf("play.fill")
+//    case .stop: return .sf("stop.fill")
+//    case .abLoop, .abLoopUpdate: return .sf("arrow.2.squarepath")
+//    case .playlistLoop: return .sf("repeat")
+//    case .fileLoop: return .sf("repeat.1")
+//    case .noLoop: return .sf("repeat.badge.xmark", "repeat.badge.xmark.circle.fill")
+//    case .audioDelay, .subDelay, .secondSubDelay:
+//      return .sf("clock.arrow.trianglehead.counterclockwise.rotate.90")
+//    default:
+//      return nil
+//    }
   }
 }

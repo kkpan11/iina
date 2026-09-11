@@ -311,7 +311,7 @@ return -1;\
                                                  8,  // 8 bit per component
                                                  width * 4,  // 4 bytes(rgba) per pixel
                                                  rgb,
-                                                 kCGImageAlphaPremultipliedLast);
+                                                 (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
   CGImageRef cgImage = CGBitmapContextCreateImage(cgContext);
 
   // Create NSImage
@@ -391,8 +391,20 @@ return -1;\
   NSMutableDictionary *info = [[NSMutableDictionary alloc] init];
   info[@"@iina_duration"] = duration == -1 ? [NSNumber numberWithInt:-1] : [NSNumber numberWithDouble:(double)duration / AV_TIME_BASE];
   AVDictionaryEntry *tag = NULL;
-  while ((tag = av_dict_get(metadata, "", tag, AV_DICT_IGNORE_SUFFIX)))
-    info[[NSString stringWithCString:tag->key encoding:NSUTF8StringEncoding]] = [NSString stringWithCString:tag->value encoding:NSUTF8StringEncoding];
+  while ((tag = av_dict_get(metadata, "", tag, AV_DICT_IGNORE_SUFFIX))) {
+    // FFmpeg may return strings that are not valid. See issue #5602.
+    const NSString *key = [NSString stringWithCString:tag->key encoding:NSUTF8StringEncoding];
+    if (!key) {
+      LOG_WARN(@"Cannot construct a string for a metadata tag key");
+      continue;
+    }
+    const NSString *value = [NSString stringWithCString:tag->value encoding:NSUTF8StringEncoding];
+    if (!value) {
+      LOG_WARN(@"Cannot construct a string for the value of the metadata tag key: %@", key);
+      continue;
+    }
+    info[key] = value;
+  }
 
   avformat_close_input(&pFormatCtx);
   avformat_free_context(pFormatCtx);
@@ -560,8 +572,9 @@ return -1;\
         // supported as output pixel format" to the console. As a workaround we convert to
         // AV_PIX_FMT_RGBA64LE and then convert the components to floating point.
         pFrameRGB->format = AV_PIX_FMT_RGBA64LE;
-        bitmapInfo = kCGImageByteOrder16Little | kCGImageAlphaPremultipliedLast |
-            kCGBitmapFloatComponents;
+        bitmapInfo = (CGBitmapInfo)kCGImageByteOrder16Little |
+                     (CGBitmapInfo)kCGImageAlphaPremultipliedLast |
+                     kCGBitmapFloatComponents;
     }
 
     // Determine required buffer size and allocate the buffer.
@@ -638,22 +651,10 @@ return -1;\
             cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2020);
             break;
           case AVCOL_TRC_ARIB_STD_B67:
-            if (@available(macOS 11.0, *)) {
-              cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2100_HLG);
-            } else if (@available(macOS 10.15.6, *)) {
-              cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2020_HLG);
-            } else {
-              cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2020);
-            }
+            cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2100_HLG);
             break;
           case AVCOL_TRC_SMPTE2084:
-            if (@available(macOS 11.0, *)) {
-              cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2100_PQ);
-            } else if (@available(macOS 10.15.4, *)) {
-              cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2020_PQ);
-            } else {
-              cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2020_PQ_EOTF);
-            }
+            cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2100_PQ);
         }
         break;
       case AVCOL_PRI_SMPTE432:
@@ -665,11 +666,7 @@ return -1;\
             cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceDisplayP3_HLG);
             break;
           case AVCOL_TRC_SMPTE2084:
-            if (@available(macOS 10.15.4, *)) {
-              cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceDisplayP3_PQ);
-            } else {
-              cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceDisplayP3_PQ_EOTF);
-            }
+            cgColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceDisplayP3_PQ);
         }
     }
     if (!cgColorSpace) {
@@ -713,6 +710,67 @@ return -1;\
     av_frame_free(&pFrame);
     av_packet_free(&packet);
     avcodec_free_context(&pCodecCtx);
+    avformat_close_input(&pFormatCtx);
+  }
+}
+
+// MARK: - Media Artwork
+
++ (NSImage *)readArtworkFromURL:(nonnull NSURL *)url
+{
+  AVFormatContext *pFormatCtx = NULL;
+
+  @try {
+    int ret = avformat_open_input(&pFormatCtx, url.fileSystemRepresentation, NULL, NULL);
+    if (ret < 0) {
+      LOG_ERROR(@"Failed to open file %@ when searching for artwork: %s (%d)", url, av_err2str(ret), ret);
+      return NULL;
+    }
+
+    ret = avformat_find_stream_info(pFormatCtx, NULL);
+    if (ret < 0) {
+      LOG_ERROR(@"Failed to obtain stream info from file %@ when searching for artwork: %s (%d)",
+                url, av_err2str(ret), ret);
+      return NULL;
+    }
+
+    // Search the streams for one that contains front cover artwork.
+    int index = 0;
+    AVPacket* packet = NULL;
+    for (int i = 0; i < pFormatCtx->nb_streams; i++) {
+      AVStream* stream = pFormatCtx->streams[i];
+
+      // For this stream to be cover artwork it must be an attached picture (APIC).
+      if ((stream->disposition & AV_DISPOSITION_ATTACHED_PIC) == 0) { continue; }
+
+      // And it must not be a stream of thumbnail images.
+      if ((stream->disposition & AV_DISPOSITION_TIMED_THUMBNAILS) != 0) { continue; }
+
+      // If a stream passes these two checks mpv identifies it as album art. To match up with mpv
+      // this is all IINA checks as well. ID3v2 defines picture types, but I did not find any code
+      // in mpv checking to confirm the image is marked as front cover art. The list of picture
+      // types can be found here: https://id3.org/id3v2.3.0#Attached_picture
+
+      // Found front cover artwork.
+      index = i;
+      packet = &stream->attached_pic;
+      break;
+    }
+
+    if (!packet) {
+      return NULL;
+    }
+
+    // Form an image from the stream's data.
+    LOG_DEBUG(@"Creating an image from stream %d using %d bytes", index, packet->size);
+    NSData *data = [[NSData alloc] initWithBytes:packet->data length:packet->size];
+    NSImage *image = [[NSImage alloc] initWithData:data];
+    if (!image) {
+      LOG_ERROR(@"Cannot create image from artwork for file: %@", url);
+    }
+    return image;
+  }
+  @finally {
     avformat_close_input(&pFormatCtx);
   }
 }

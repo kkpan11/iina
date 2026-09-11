@@ -39,6 +39,7 @@ struct AppData {
   static let seekAmountMap = [0, 0.05, 0.1, 0.25, 0.5]
   static let seekAmountMapMouse = [0, 0.5, 1, 2, 4]
   static let volumeMap = [0, 0.25, 0.5, 0.75, 1]
+  static let playbackSpeedMap = [0, 0.001, 0.002, 0.005, 0.01]
 
   static let encodings = CharEncoding.list
 
@@ -62,15 +63,13 @@ struct AppData {
   static let chromeExtensionLink = "https://chrome.google.com/webstore/detail/open-in-iina/pdnojahnhpgmdhjdhgphgdcecehkbhfo"
   static let firefoxExtensionLink = "https://addons.mozilla.org/addon/open-in-iina-x"
   static let toneMappingHelpLink = "https://en.wikipedia.org/wiki/Tone_mapping"
-  static let targetPeakHelpLink = "https://mpv.io/manual/stable/#options-target-peak"
-  static let algorithmHelpLink = "https://mpv.io/manual/stable/#options-tone-mapping"
-  static let disableAnimationsHelpLink = "https://developer.apple.com/design/human-interface-guidelines/accessibility#Motion"
-  static let gainAdjustmentHelpLink = "https://mpv.io/manual/stable/#options-replaygain"
-  static let audioDriverHellpLink = "https://mpv.io/manual/stable/#audio-output-drivers-coreaudio"
+  static let disableAnimationsHelpLink = "https://developer.apple.com/design/human-interface-guidelines/accessibility#Cognitive"
+  static let mpvManualLink = "https://mpv.io/manual/stable"
 
   static let widthWhenNoVideo = 640
   static let heightWhenNoVideo = 360
   static let sizeWhenNoVideo = NSSize(width: widthWhenNoVideo, height: heightWhenNoVideo)
+  static let mainWindowMinSize = NSMakeSize(285, 120)
 }
 
 
@@ -80,6 +79,7 @@ struct Constants {
     static let dot = "●"
     static let blackRightPointingTriangle = "▶︎"
     static let blackLeftPointingTriangle = "◀"
+    static let mpvDefaultFont = "sans-serif"
     static let videoTimePlaceholder = "--:--:--"
     static let trackNone = NSLocalizedString("track.none", comment: "<None>")
     static let chapter = "Chapter"
@@ -131,14 +131,30 @@ struct Constants {
 
 extension Notification.Name {
   static let iinaMainWindowChanged = Notification.Name("IINAMainWindowChanged")
+  static let iinaMusicModeChanged = Notification.Name("IINAMusicModeChanged")
   static let iinaPlaylistChanged = Notification.Name("IINAPlaylistChanged")
+  static let iinaChapterListChanged = Notification.Name("IINAChapterListChanged")
   static let iinaTracklistChanged = Notification.Name("IINATracklistChanged")
+  static let iinaLoopStatusChanged = Notification.Name("iinaLoopStatusChanged")
+
   static let iinaVIDChanged = Notification.Name("iinaVIDChanged")
   static let iinaAIDChanged = Notification.Name("iinaAIDChanged")
   static let iinaSIDChanged = Notification.Name("iinaSIDChanged")
+  static let iinaSpeedChanged = Notification.Name("IINASpeedChanged")
   static let iinaMediaTitleChanged = Notification.Name("IINAMediaTitleChanged")
+  static let iinaVideoParamsChanged = Notification.Name("iinaVideoParamsChanged")
   static let iinaVFChanged = Notification.Name("IINAVfChanged")
+  static let iinaVideoEqualizerChanged = Notification.Name("iinaVideoEqualizerChanged")
+  static let iinaDeinterlaceChanged = Notification.Name("iinaDeinterlaceChanged")
+  static let iinaHwdecChanged = Notification.Name("iinaHwdecChanged")
+  static let iinaHDRChanged = Notification.Name("iinaHDRChanged")
   static let iinaAFChanged = Notification.Name("IINAAfChanged")
+  static let iinaAudioDelayChanged = Notification.Name("iinaAudioDelayChanged")
+  static let iinaSubScaleChanged = Notification.Name("iinaSubScaleChanged")
+  static let iinaSubPositionChanged = Notification.Name("iinaSubPositionChanged")
+  static let iinaSubDelayChanged = Notification.Name("iinaSubDelayChanged")
+  static let iinaSubVisibilityChanged = Notification.Name("iinaSubVisibilityChanged")
+
   static let iinaKeyBindingInputChanged = Notification.Name("IINAKeyBindingInputChanged")
   static let iinaFileLoaded = Notification.Name("IINAFileLoaded")
   static let iinaHistoryUpdated = Notification.Name("IINAHistoryUpdated")
@@ -150,9 +166,11 @@ extension Notification.Name {
   static let iinaPlayerShutdown = Notification.Name("iinaPlayerShutdown")
   static let iinaPlaySliderLoopKnobChanged = Notification.Name("iinaPlaySliderLoopKnobChanged")
   static let iinaLogoutCompleted = Notification.Name("iinaLoggedOutOfSubtitleProvider")
-  static let iinaSecondSubVisibilityChanged = Notification.Name("iinaSecondSubVisibilityChanged")
-  static let iinaSubVisibilityChanged = Notification.Name("iinaSubVisibilityChanged")
   static let iinaHistoryTaskFinished = Notification.Name("iinaHistoryTaskFinished")
+  static let iinaPIPStatusChanged = Notification.Name("iinaPIPStatusChanged")
+  static let iinaFullscreenChanged = Notification.Name("iinaFullscreenChanged")
+  static let iinaSidebarStatusChanged = Notification.Name("iinaSidebarStatusChanged")
+  static let iinaLogAppended = Notification.Name("iinaLogAppended")
 }
 
 enum IINAError: Error {

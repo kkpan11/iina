@@ -8,7 +8,7 @@
 
 import Cocoa
 
-fileprivate let subsystem = Logger.makeSubsystem("thumbcache")
+fileprivate let subsystem = Logger.makeSubsystem("thumbcache", ["photo.stack"])
 
 class ThumbnailCache {
   private typealias CacheVersion = UInt8
@@ -23,7 +23,7 @@ class ThumbnailCache {
     .compressionFactor: 0.75
   ]
   
-  private static func log(_ message: String, level: Logger.Level = .debug) {
+  private static func log(_ message: @autoclosure () -> String, level: Logger.Level = .debug) {
     Logger.log(message, level: level, subsystem: subsystem)
   }
 
@@ -186,6 +186,11 @@ class ThumbnailCache {
     file.closeFile()
     log("Finished reading thumbnail cache, \(result.count) in total")
     return result
+  }
+
+  static func clearThumbnailCache() {
+    try? FileManager.default.removeItem(atPath: Utility.thumbnailCacheURL.path)
+    Utility.createDirIfNotExist(url: Utility.thumbnailCacheURL)
   }
 
   private static func deleteCacheFile(at pathURL: URL) {

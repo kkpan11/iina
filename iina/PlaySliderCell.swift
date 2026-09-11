@@ -28,11 +28,10 @@ class PlaySliderCell: NSSliderCell {
   let knobRadius: CGFloat = 1
   let barRadius: CGFloat = 1.5
 
-  private var knobColor = NSColor(named: .mainSliderKnob)!
-  private var knobActiveColor = NSColor(named: .mainSliderKnobActive)!
-  private var barColorLeft = NSColor(named: .mainSliderBarLeft)!
-  private var barColorRight = NSColor(named: .mainSliderBarRight)!
-  private var chapterStrokeColor = NSColor(named: .mainSliderBarChapterStroke)!
+  private var knobColor = NSColor.mainSliderKnob
+  private var knobActiveColor = NSColor.mainSliderKnobActive
+  private var barColorLeft = NSColor.mainSliderBarLeft
+  private var barColorRight = NSColor.mainSliderBarRight
 
   var drawChapters = Preference.bool(for: .showChapterPos)
 
@@ -96,12 +95,7 @@ class PlaySliderCell: NSSliderCell {
     let pos = barRect.origin.x + CGFloat(percentage) * effectiveBarWidth
     let rect = super.knobRect(flipped: flipped)
 
-    let height: CGFloat
-    if #available(macOS 11, *) {
-      height = (barRect.origin.y - rect.origin.y) * 2 + barRect.height
-    } else {
-      height = rect.height
-    }
+    let height: CGFloat = (barRect.origin.y - rect.origin.y) * 2 + barRect.height
     return NSMakeRect(pos, rect.origin.y, knobWidth, height)
   }
 
@@ -127,17 +121,32 @@ class PlaySliderCell: NSSliderCell {
     }
 
     NSGraphicsContext.saveGraphicsState()
-    let barRect: NSRect
-    if #available(macOS 11, *) {
-      barRect = rect
-    } else {
-      barRect = NSMakeRect(rect.origin.x, rect.origin.y + 1, rect.width, rect.height - 2)
-    }
+    let barRect: NSRect = rect
     let path = NSBezierPath(roundedRect: barRect, xRadius: barRadius, yRadius: barRadius)
+
+    // draw chapters
+    // add a rect for each chapter indicator line
+    let chapterClip = NSBezierPath()
+    if drawChapters {
+      // When streaming if the audio stream is changed mpv will momentarily reset the video duration
+      // to zero. Not useful to draw the chapter marks when the duration is unknown.
+      if let totalSec = info.videoDuration?.second, totalSec != 0 {
+        let chapters = info.chapters
+        if chapters.count > 1 {
+          for chapt in chapters[1...] {
+            let chapPos = CGFloat(chapt.time.second) / CGFloat(totalSec) * barRect.width
+            let rect = NSRect(x: chapPos - 0.5, y: barRect.origin.y, width: 1, height: barRect.height)
+            chapterClip.append(NSBezierPath(rect: rect))
+          }
+        }
+      }
+    }
 
     // draw left
     let pathLeftRect : NSRect = NSMakeRect(barRect.origin.x, barRect.origin.y, progress, barRect.height)
-    NSBezierPath(rect: pathLeftRect).addClip();
+    let clipL = NSBezierPath(rect: pathLeftRect)
+    clipL.append(chapterClip.reversed)
+    clipL.addClip()
 
     if controlView!.window!.effectiveAppearance.isDark {
       // Clip 1px around the knob
@@ -150,31 +159,14 @@ class PlaySliderCell: NSSliderCell {
 
     // draw right
     NSGraphicsContext.saveGraphicsState()
+
     let pathRight = NSMakeRect(barRect.origin.x + progress, barRect.origin.y, barRect.width - progress, barRect.height)
-    NSBezierPath(rect: pathRight).setClip()
+    let clipR = NSBezierPath(rect: pathRight)
+    clipR.append(chapterClip.reversed)
+    clipR.addClip()
+
     barColorRight.setFill()
     path.fill()
-    NSGraphicsContext.restoreGraphicsState()
-
-    // draw chapters
-    NSGraphicsContext.saveGraphicsState()
-    if drawChapters {
-      // When streaming if the audio stream is changed mpv will momentarily reset the video duration
-      // to zero. Not useful to draw the chapter marks when the duration is unknown.
-      if let totalSec = info.videoDuration?.second, totalSec != 0 {
-        chapterStrokeColor.setStroke()
-        let chapters = info.chapters
-        if chapters.count > 1 {
-          for chapt in chapters[1...] {
-            let chapPos = CGFloat(chapt.time.second) / CGFloat(totalSec) * barRect.width
-            let linePath = NSBezierPath()
-            linePath.move(to: NSPoint(x: chapPos, y: barRect.origin.y))
-            linePath.line(to: NSPoint(x: chapPos, y: barRect.origin.y + barRect.height))
-            linePath.stroke()
-          }
-        }
-      }
-    }
     NSGraphicsContext.restoreGraphicsState()
   }
 
